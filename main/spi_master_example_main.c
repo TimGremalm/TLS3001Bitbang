@@ -7,79 +7,121 @@
 #include "freertos/task.h"
 #include "esp_system.h"
 #include "esp_log.h"
-#include "driver/spi_master.h"
-#include "soc/gpio_struct.h"
-#include "driver/gpio.h"
+#include "driver/rmt.h"
 
-//#define PIN_NUM_MISO 12
-//#define PIN_NUM_MOSI 13
-//#define PIN_NUM_CLK  14
-//#define PIN_NUM_CS   15
-#define PIN_NUM_MISO 25
-#define PIN_NUM_MOSI 23
-#define PIN_NUM_CLK  19
-#define PIN_NUM_CS   22
+#define RMT_TX_CHANNEL RMT_CHANNEL_0
+#define RMT_TX_GPIO 18
+#define SAMPLE_CNT  (10)
 
 static const char *TAG = "spimaster";
 
-void send_stuff(spi_device_handle_t spi) {
-	uint8_t buf[4];
-	buf[0] = 1;
-	buf[1] = 2;
-	buf[2] = 3;
-	buf[3] = 4;
+typedef union {
+	struct __attribute__ ((packed)) {
+		uint8_t r, g, b;
+	};
+	uint32_t num;
+} rgbVal;
 
-	spi_transaction_t trans;
+inline rgbVal makeRGBVal(uint8_t r, uint8_t g, uint8_t b) {
+	rgbVal v;
+	v.r = r;
+	v.g = g;
+	v.b = b;
+	return v;
+}
 
-	memset(&trans, 0, sizeof(spi_transaction_t));
-	trans.length=8*4;
-	trans.tx_buffer=&buf;
-	trans.flags=SPI_TRANS_USE_TXDATA;
-	trans.user=(void*)0;
 
-	ESP_ERROR_CHECK(spi_device_queue_trans(spi, &trans, portMAX_DELAY));
+rmt_item32_t items[] = {
+	// E : dot
+	{{{ 32767, 1, 32767, 0 }}}, // dot
+	//
+	{{{ 32767, 0, 32767, 0 }}}, // SPACE
+	// S : dot, dot, dot
+	{{{ 32767, 1, 32767, 0 }}}, // dot
+	{{{ 32767, 1, 32767, 0 }}}, // dot
+	{{{ 32767, 1, 32767, 0 }}}, // dot
+	//
+	{{{ 32767, 0, 32767, 0 }}}, // SPACE
+	// P : dot, dash, dash, dot
+	{{{ 32767, 1, 32767, 0 }}}, // dot
+	{{{ 32767, 1, 32767, 1 }}},
+	{{{ 32767, 1, 32767, 0 }}}, // dash
+	{{{ 32767, 1, 32767, 1 }}},
+	{{{ 32767, 1, 32767, 0 }}}, // dash
+	{{{ 32767, 1, 32767, 0 }}}, // dot
 
-	spi_transaction_t *recPayload;
-	recPayload = &trans;
-	ESP_ERROR_CHECK(spi_device_get_trans_result(spi, &recPayload, portMAX_DELAY));
+	// RMT end marker
+	{{{ 0, 1, 0, 0 }}}
+};
 
-	//uint8_t cmd[3];
-	//cmd[0] = 1;
-	//cmd[1] = 2;
-	//cmd[2] = 3;
-
-	//spi_transaction_t t;
-	//memset(&t, 0, sizeof(t));
-	//t.length=24;
-	//t.tx_buffer=&cmd;
-	//t.user=(void*)0;
-	//ESP_ERROR_CHECK(spi_device_polling_transmit(spi, &t));
+//Convert uint8_t type of data to rmt format data.
+static void IRAM_ATTR u8_to_rmt(const void* src, rmt_item32_t* dest, size_t src_size, size_t wanted_num, size_t* translated_size, size_t* item_num) {
+	if(src == NULL || dest == NULL) {
+		*translated_size = 0;
+		*item_num = 0;
+		return;
+	}
+	const rmt_item32_t bit0 = {{{ 32767, 1, 15000, 0 }}}; //Logical 0
+	const rmt_item32_t bit1 = {{{ 32767, 1, 32767, 0 }}}; //Logical 1
+	size_t size = 0;
+	size_t num = 0;
+	uint8_t *psrc = (uint8_t *)src;
+	rmt_item32_t* pdest = dest;
+	while (size < src_size && num < wanted_num) {
+		for(int i = 0; i < 8; i++) {
+			if(*psrc & (0x1 << i)) {
+				pdest->val =  bit1.val;
+			} else {
+				pdest->val =  bit0.val;
+			}
+			num++;
+			pdest++;
+		}
+		size++;
+		psrc++;
+	}
+	*translated_size = size;
+	*item_num = num;
 }
 
 static void light_control(void *arg) {
-	ESP_LOGI(TAG, "[APP] Init SPI ");
-	spi_device_handle_t spi;
-	spi_bus_config_t buscfg = {
-		.miso_io_num=PIN_NUM_MISO,
-		.mosi_io_num=PIN_NUM_MOSI,
-		.sclk_io_num=PIN_NUM_CLK,
-		.quadwp_io_num=-1,
-		.quadhd_io_num=-1,
-		.max_transfer_sz=32
-	};
-	spi_device_interface_config_t devcfg = {
-		.clock_speed_hz=10*1000*1000,
-		.mode=0,
-		.spics_io_num=PIN_NUM_CS,
-		.queue_size=7,
-	};
-	ESP_ERROR_CHECK(spi_bus_initialize(HSPI_HOST, &buscfg, 1));
-	ESP_ERROR_CHECK(spi_bus_add_device(HSPI_HOST, &devcfg, &spi));
-	ESP_LOGI(TAG, "[APP] SPI init done");
+	ESP_LOGI(TAG, "[APP] Init");
+
+	rmt_config_t config;
+	config.rmt_mode = RMT_MODE_TX;
+	config.channel = RMT_TX_CHANNEL;
+	config.gpio_num = RMT_TX_GPIO;
+	config.mem_block_num = 1;
+	config.tx_config.loop_en = 0;
+	// enable the carrier to be able to hear the Morse sound
+	// if the RMT_TX_GPIO is connected to a speaker
+	config.tx_config.carrier_en = 1;
+	config.tx_config.idle_output_en = 1;
+	config.tx_config.idle_level = 0;
+	config.tx_config.carrier_duty_percent = 50;
+	// set audible career frequency of 611 Hz
+	// actually 611 Hz is the minimum, that can be set
+	// with current implementation of the RMT API
+	config.tx_config.carrier_freq_hz = 611;
+	config.tx_config.carrier_level = 1;
+	// set the maximum clock divider to be able to output
+	// RMT pulses in range of about one hundred milliseconds
+	config.clk_div = 255;
+
+	ESP_ERROR_CHECK(rmt_config(&config));
+	ESP_ERROR_CHECK(rmt_driver_install(config.channel, 0, 0));
+	ESP_ERROR_CHECK(rmt_translator_init(config.channel, u8_to_rmt));
+
+	int number_of_items = sizeof(items) / sizeof(items[0]);
+	const uint8_t sample[SAMPLE_CNT] = {0, 1, 2, 3, 4, 5, 6, 7, 8, 9};
+
+	ESP_LOGI(TAG, "[APP] Init done");
 	while (1) {
 		ESP_LOGI(TAG, "[APP] Send packet");
-		send_stuff(spi);
-		vTaskDelay(500 / portTICK_PERIOD_MS);
+		ESP_ERROR_CHECK(rmt_write_items(RMT_TX_CHANNEL, items, number_of_items, true));
+		vTaskDelay(1000 / portTICK_PERIOD_MS);
+		ESP_ERROR_CHECK(rmt_write_sample(RMT_TX_CHANNEL, sample, SAMPLE_CNT, true));
+		vTaskDelay(2000 / portTICK_PERIOD_MS);
 	}
 }
 
