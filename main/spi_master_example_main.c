@@ -21,36 +21,6 @@ typedef union {
 	uint32_t num;
 } rgbVal;
 
-inline rgbVal makeRGBVal(uint8_t r, uint8_t g, uint8_t b) {
-	rgbVal v;
-	v.r = r;
-	v.g = g;
-	v.b = b;
-	return v;
-}
-
-rmt_item32_t items[] = {
-	// E : dot
-	{{{ 32767, 1, 32767, 0 }}}, // dot
-	//
-	{{{ 32767, 0, 32767, 0 }}}, // SPACE
-	// S : dot, dot, dot
-	{{{ 32767, 1, 32767, 0 }}}, // dot
-	{{{ 32767, 1, 32767, 0 }}}, // dot
-	{{{ 32767, 1, 32767, 0 }}}, // dot
-	//
-	{{{ 32767, 0, 32767, 0 }}}, // SPACE
-	// P : dot, dash, dash, dot
-	{{{ 32767, 1, 32767, 0 }}}, // dot
-	{{{ 32767, 1, 32767, 1 }}},
-	{{{ 32767, 1, 32767, 0 }}}, // dash
-	{{{ 32767, 1, 32767, 1 }}},
-	{{{ 32767, 1, 32767, 0 }}}, // dash
-	{{{ 32767, 1, 32767, 0 }}}, // dot
-	// RMT end marker
-	{{{ 0, 1, 0, 0 }}}
-};
-
 #define NUM(a) (sizeof(a) / sizeof(*a))
 #define RMT_BLOCK_LEN	32
 #define data_one  {{{ 255, 1, 255, 0 }}}
@@ -64,10 +34,6 @@ rmt_item32_t packet_resetdevice[] = {
 	data_zero,
 	data_zero
 }; //Reset device (19 bits, 15 x 0b1, 1 x 0b0, 1 x 0b1 & 2 x 0b0)
-
-rmt_item32_t packet_blank[] = {
-	data_5usblank
-}; //Blank
 
 rmt_item32_t packet_delayresetsync[] = {
 	data_5usblank, data_5usblank
@@ -134,14 +100,6 @@ static void light_control(void *arg) {
 	ESP_ERROR_CHECK(rmt_config(&config));
 	ESP_ERROR_CHECK(rmt_driver_install(config.channel, 0, 0));
 	//ESP_ERROR_CHECK(rmt_translator_init(config.channel, u8_to_rmt));
-
-	//int number_of_items = sizeof(items) / sizeof(items[0]);
-	//int number_of_items = sizeof(packet_startdata) / sizeof(packet_startdata[0]);
-
-	//Blank RMT buffer
-	//for (int i = 0; i<64; i++) {
-	//	ESP_ERROR_CHECK(rmt_fill_tx_items(RMT_TX_CHANNEL, packet_blank, 1, i*RMT_BLOCK_LEN));
-	//}
 
 	ESP_LOGI(TAG, "[APP] Init done");
 	while (1) {
