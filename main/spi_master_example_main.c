@@ -23,9 +23,10 @@ typedef union {
 
 #define NUM(a) (sizeof(a) / sizeof(*a))
 #define RMT_BLOCK_LEN	32
-#define data_one  {{{ 255, 1, 255, 0 }}}
-#define data_zero {{{ 255, 0, 255, 1 }}}
-#define data_5usblank {{{ 20000, 0, 18000, 0 }}}
+#define data_one  {{{ 3, 1, 3, 0 }}}
+#define data_zero {{{ 3, 0, 3, 1 }}}
+#define data_1msblank {{{ 500, 0, 500, 0 }}}
+#define data_187usblank {{{ 32767, 0, 32767, 0 }}}
 
 rmt_item32_t packet_resetdevice[] = {
 	data_one, data_one, data_one, data_one, data_one, data_one, data_one, data_one, data_one, data_one, data_one, data_one, data_one, data_one, data_one,
@@ -36,7 +37,7 @@ rmt_item32_t packet_resetdevice[] = {
 }; //Reset device (19 bits, 15 x 0b1, 1 x 0b0, 1 x 0b1 & 2 x 0b0)
 
 rmt_item32_t packet_delayresetsync[] = {
-	data_5usblank, data_5usblank
+	data_1msblank
 }; //Delay (1mS) between Reset device and Synchronize device
 
 rmt_item32_t packet_syncdevice[] = {
@@ -95,7 +96,7 @@ static void light_control(void *arg) {
 	config.tx_config.carrier_en = 0;
 	config.tx_config.idle_output_en = 1;
 	config.tx_config.idle_level = 0;
-	config.clk_div = 1;
+	config.clk_div = 76;
 
 	ESP_ERROR_CHECK(rmt_config(&config));
 	ESP_ERROR_CHECK(rmt_driver_install(config.channel, 0, 0));
@@ -104,7 +105,6 @@ static void light_control(void *arg) {
 	ESP_LOGI(TAG, "[APP] Init done");
 	while (1) {
 		ESP_LOGI(TAG, "[APP] Send packet");
-		//ESP_ERROR_CHECK(rmt_write_items(RMT_TX_CHANNEL, items, number_of_items, true));
 		ESP_ERROR_CHECK(rmt_write_items(RMT_TX_CHANNEL, packet_resetdevice, NUM(packet_resetdevice), true));
 		ESP_ERROR_CHECK(rmt_write_items(RMT_TX_CHANNEL, packet_delayresetsync, NUM(packet_delayresetsync), true));
 		ESP_ERROR_CHECK(rmt_write_items(RMT_TX_CHANNEL, packet_syncdevice, NUM(packet_syncdevice), true));
