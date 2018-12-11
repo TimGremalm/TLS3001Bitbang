@@ -23,10 +23,11 @@ typedef union {
 
 #define NUM(a) (sizeof(a) / sizeof(*a))
 #define RMT_BLOCK_LEN	32
+#define RMT_MAX_DELAY 32767
+#define blank_187us 187
 #define data_one  {{{ 3, 1, 3, 0 }}}
 #define data_zero {{{ 3, 0, 3, 1 }}}
 #define data_1msblank {{{ 500, 0, 500, 0 }}}
-#define data_187usblank {{{ 32767, 0, 32767, 0 }}}
 
 rmt_item32_t packet_resetdevice[] = {
 	data_one, data_one, data_one, data_one, data_one, data_one, data_one, data_one, data_one, data_one, data_one, data_one, data_one, data_one, data_one,
@@ -54,38 +55,57 @@ rmt_item32_t packet_startdata[] = {
 	data_zero
 }; //Start of data (19 bits, 15 x 0b1, 2 x 0b0, 1 x 0b1 & 1 x 0b0)
 
-//Convert uint8_t type of data to rmt format data.
-static void IRAM_ATTR u8_to_rmt(const void* src, rmt_item32_t* dest, size_t src_size, size_t wanted_num, size_t* translated_size, size_t* item_num) {
-	if(src == NULL || dest == NULL) {
-		*translated_size = 0;
-		*item_num = 0;
-		return;
+////Convert uint8_t type of data to rmt format data.
+//static void IRAM_ATTR u8_to_rmt(const void* src, rmt_item32_t* dest, size_t src_size, size_t wanted_num, size_t* translated_size, size_t* item_num) {
+//	if(src == NULL || dest == NULL) {
+//		*translated_size = 0;
+//		*item_num = 0;
+//		return;
+//	}
+//	const rmt_item32_t bit0 = {{{ 32767, 1, 15000, 0 }}}; //Logical 0
+//	const rmt_item32_t bit1 = {{{ 32767, 1, 32767, 0 }}}; //Logical 1
+//	size_t size = 0;
+//	size_t num = 0;
+//	uint8_t *psrc = (uint8_t *)src;
+//	rmt_item32_t* pdest = dest;
+//	while (size < src_size && num < wanted_num) {
+//		for(int i = 0; i < 8; i++) {
+//			if(*psrc & (0x1 << i)) {
+//				pdest->val =  bit1.val;
+//			} else {
+//				pdest->val =  bit0.val;
+//			}
+//			num++;
+//			pdest++;
+//		}
+//		size++;
+//		psrc++;
+//	}
+//	*translated_size = size;
+//	*item_num = num;
+//}
+
+void generate_packet_startreset_silence(rmt_item32_t packet_startreset_silence[], int numberof_max_delays, int remainderdelay) {
+	rmt_item32_t delaypacket;
+	for (int i = 0; i<numberof_max_delays; i++) {
+		delaypacket.duration0 = RMT_MAX_DELAY;
+		packet_startreset_silence[i] = delaypacket;
 	}
-	const rmt_item32_t bit0 = {{{ 32767, 1, 15000, 0 }}}; //Logical 0
-	const rmt_item32_t bit1 = {{{ 32767, 1, 32767, 0 }}}; //Logical 1
-	size_t size = 0;
-	size_t num = 0;
-	uint8_t *psrc = (uint8_t *)src;
-	rmt_item32_t* pdest = dest;
-	while (size < src_size && num < wanted_num) {
-		for(int i = 0; i < 8; i++) {
-			if(*psrc & (0x1 << i)) {
-				pdest->val =  bit1.val;
-			} else {
-				pdest->val =  bit0.val;
-			}
-			num++;
-			pdest++;
-		}
-		size++;
-		psrc++;
-	}
-	*translated_size = size;
-	*item_num = num;
+	delaypacket.duration0 = remainderdelay;
+	packet_startreset_silence[numberof_max_delays] = delaypacket;
 }
 
 static void light_control(void *arg) {
 	ESP_LOGI(TAG, "[APP] Init");
+
+	int number_of_leds = 2;
+
+	int total_delay = number_of_leds * blank_187us;
+	int numberof_max_delays = total_delay / RMT_MAX_DELAY;
+	int remainderdelay = total_delay % RMT_MAX_DELAY;
+	rmt_item32_t packet_led_silence[numberof_max_delays+1];
+	generate_packet_startreset_silence(packet_led_silence, numberof_max_delays, remainderdelay);
+	ESP_LOGI(TAG, "[APP] Total leds: %d, number of max delays: %d, remainder: %d", number_of_leds, numberof_max_delays, remainderdelay);
 
 	rmt_config_t config;
 	config.rmt_mode = RMT_MODE_TX;
@@ -107,6 +127,8 @@ static void light_control(void *arg) {
 		ESP_LOGI(TAG, "[APP] Send packet");
 		ESP_ERROR_CHECK(rmt_write_items(RMT_TX_CHANNEL, packet_resetdevice, NUM(packet_resetdevice), true));
 		ESP_ERROR_CHECK(rmt_write_items(RMT_TX_CHANNEL, packet_delayresetsync, NUM(packet_delayresetsync), true));
+		ESP_ERROR_CHECK(rmt_write_items(RMT_TX_CHANNEL, packet_syncdevice, NUM(packet_syncdevice), true));
+		ESP_ERROR_CHECK(rmt_write_items(RMT_TX_CHANNEL, packet_led_silence, NUM(packet_led_silence), true));
 		ESP_ERROR_CHECK(rmt_write_items(RMT_TX_CHANNEL, packet_syncdevice, NUM(packet_syncdevice), true));
 		vTaskDelay(1000 / portTICK_PERIOD_MS);
 	}
