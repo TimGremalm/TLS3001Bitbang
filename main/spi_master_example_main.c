@@ -28,6 +28,8 @@ typedef struct {
 	int indexSync;
 	int indexDelaySyncStart;
 	int indexStart;
+	int indexPacket;
+	int indexStartEnd;
 } TLSCONFIG;
 
 #define NUM(a) (sizeof(a) / sizeof(*a))
@@ -37,7 +39,7 @@ typedef struct {
 #define data_one  {{{ 3, 1, 3, 0 }}}
 #define data_zero {{{ 3, 0, 3, 1 }}}
 #define data_1msblank {{{ 500, 0, 500, 0 }}}
-#define data_rgbdelay {{{ 2, 0, 1, 0 }}}
+#define data_rgbdelay {{{ 20, 0, 20, 0 }}}
 
 rmt_item32_t packet_resetdevice[] = {
 	data_one, data_one, data_one, data_one, data_one, data_one, data_one, data_one, data_one, data_one, data_one, data_one, data_one, data_one, data_one,
@@ -66,17 +68,13 @@ rmt_item32_t packet_startdata[] = {
 }; //Start of data (19 bits, 15 x 0b1, 2 x 0b0, 1 x 0b1 & 1 x 0b0)
 
 rmt_item32_t packet_startandblackrgb[] = {
-	data_one, data_one, data_one, data_one, data_one, data_one, data_one, data_one, data_one, data_one, data_one, data_one, data_one, data_one, data_one,
-	data_zero, data_zero,
-	data_one,
-	data_zero, //Start of data (19 bits, 15 x 0b1, 2 x 0b0, 1 x 0b1 & 1 x 0b0)
 	data_zero,
-	data_one, data_zero, data_zero, data_zero, data_zero, data_zero, data_zero, data_zero, data_zero, data_zero, data_zero, data_one,
+	data_zero, data_zero, data_zero, data_zero, data_one, data_zero, data_zero, data_zero, data_zero, data_zero, data_zero, data_one,
 	data_zero,
 	data_zero, data_zero, data_zero, data_zero, data_zero, data_zero, data_zero, data_zero, data_zero, data_zero, data_zero, data_one,
 	data_zero,
-	data_zero, data_zero, data_zero, data_zero, data_zero, data_zero, data_zero, data_zero, data_zero, data_zero, data_zero, data_one,
-	data_rgbdelay //Data for each pixel (39 bits, 1 x 0b0, 12bits pixel data, 1 x 0b0, 12bits pixel data, 1 x 0b0 & 12bits pixel data)
+	data_zero, data_zero, data_zero, data_zero, data_zero, data_zero, data_zero, data_zero, data_zero, data_zero, data_zero, data_one, //Data for each pixel (39 bits, 1 x 0b0, 12bits pixel data, 1 x 0b0, 12bits pixel data, 1 x 0b0 & 12bits pixel data)
+	data_rgbdelay
 }; 
 
 void generate_packet_startreset_silence(rmt_item32_t packet_startreset_silence[], int numberof_max_delays, int remainderdelay) {
@@ -97,31 +95,41 @@ void generate_big_package(TLSCONFIG *conf) {
 	delaypacket.duration1 = 1;
 	delaypacket.level1 = 0;
 
-	//Calculate start indexes, delay between Sync and Star varrays on the number of leds * 187µs
+	//Calculate start indexes, delay between Sync and Star arrays numberofleds*187µs (delay = numberofleds/baudMHz * 30)
 	int startrgbSize = sizeof(packet_startandblackrgb)/sizeof(rmt_item32_t);
-	conf->packetSize = (sizeof(packet_resetdevice)+sizeof(packet_delayresetsync)+sizeof(packet_syncdevice))/sizeof(rmt_item32_t);
+	conf->packetSize = (sizeof(packet_resetdevice)+
+							sizeof(packet_delayresetsync)+
+							sizeof(packet_syncdevice))/
+						sizeof(rmt_item32_t);
 	conf->packetSize += sizeof(delaypacket)/sizeof(rmt_item32_t);
+	conf->packetSize += sizeof(packet_startdata)/sizeof(rmt_item32_t);
 	conf->packetSize += startrgbSize*conf->numberOfLeds;
+	conf->packetSize += sizeof(packet_startdata)/sizeof(rmt_item32_t);
 	conf->indexReset = 0;
 	conf->indexDelayResetSync = conf->indexReset + sizeof(packet_resetdevice)/sizeof(rmt_item32_t);
 	conf->indexSync = conf->indexDelayResetSync + sizeof(packet_delayresetsync)/sizeof(rmt_item32_t);
 	conf->indexDelaySyncStart = conf->indexSync + sizeof(packet_syncdevice)/sizeof(rmt_item32_t);
 	conf->indexStart = conf->indexDelaySyncStart + sizeof(delaypacket)/sizeof(rmt_item32_t);
+	conf->indexPacket = conf->indexStart + sizeof(packet_startdata)/sizeof(rmt_item32_t);
+	conf->indexStartEnd = conf->indexPacket + (startrgbSize*conf->numberOfLeds);
 
 	//Allocate the big TLS3001 packet
 	conf->pPacket = calloc(conf->packetSize, sizeof(rmt_item32_t));
 
-	//Fill packet with packets
+	//Fill packet with reset, start, sync and delays
 	memcpy(&conf->pPacket[conf->indexReset], packet_resetdevice, sizeof(packet_resetdevice));
 	memcpy(&conf->pPacket[conf->indexDelayResetSync], packet_delayresetsync, sizeof(packet_delayresetsync));
 	memcpy(&conf->pPacket[conf->indexSync], packet_syncdevice, sizeof(packet_syncdevice));
 	memcpy(&conf->pPacket[conf->indexDelaySyncStart], &delaypacket, sizeof(delaypacket));
+	memcpy(&conf->pPacket[conf->indexStart], packet_startdata, sizeof(packet_startdata));
 
 	//Fill the rest of the packet with start and black RGB packets
 	//memcpy(&conf->pPacket[conf->indexStart], packet_startandblackrgb, sizeof(packet_startandblackrgb));
 	for (int i = 0; i < conf->numberOfLeds; i++) {
-		memcpy(&conf->pPacket[conf->indexStart+(startrgbSize*i)], packet_startandblackrgb, sizeof(packet_startandblackrgb));
+		memcpy(&conf->pPacket[conf->indexPacket+(startrgbSize*i)], packet_startandblackrgb, sizeof(packet_startandblackrgb));
 	}
+
+	memcpy(&conf->pPacket[conf->indexStartEnd], packet_startdata, sizeof(packet_startdata));
 }
 
 static void light_control(void *arg) {
