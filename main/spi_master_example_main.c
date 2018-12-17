@@ -37,6 +37,7 @@ typedef struct {
 #define data_one  {{{ 3, 1, 3, 0 }}}
 #define data_zero {{{ 3, 0, 3, 1 }}}
 #define data_1msblank {{{ 500, 0, 500, 0 }}}
+#define data_rgbdelay {{{ 2, 0, 1, 0 }}}
 
 rmt_item32_t packet_resetdevice[] = {
 	data_one, data_one, data_one, data_one, data_one, data_one, data_one, data_one, data_one, data_one, data_one, data_one, data_one, data_one, data_one,
@@ -64,6 +65,20 @@ rmt_item32_t packet_startdata[] = {
 	data_zero
 }; //Start of data (19 bits, 15 x 0b1, 2 x 0b0, 1 x 0b1 & 1 x 0b0)
 
+rmt_item32_t packet_startandblackrgb[] = {
+	data_one, data_one, data_one, data_one, data_one, data_one, data_one, data_one, data_one, data_one, data_one, data_one, data_one, data_one, data_one,
+	data_zero, data_zero,
+	data_one,
+	data_zero, //Start of data (19 bits, 15 x 0b1, 2 x 0b0, 1 x 0b1 & 1 x 0b0)
+	data_zero,
+	data_one, data_zero, data_zero, data_zero, data_zero, data_zero, data_zero, data_zero, data_zero, data_zero, data_zero, data_one,
+	data_zero,
+	data_zero, data_zero, data_zero, data_zero, data_zero, data_zero, data_zero, data_zero, data_zero, data_zero, data_zero, data_one,
+	data_zero,
+	data_zero, data_zero, data_zero, data_zero, data_zero, data_zero, data_zero, data_zero, data_zero, data_zero, data_zero, data_one,
+	data_rgbdelay //Data for each pixel (39 bits, 1 x 0b0, 12bits pixel data, 1 x 0b0, 12bits pixel data, 1 x 0b0 & 12bits pixel data)
+}; 
+
 void generate_packet_startreset_silence(rmt_item32_t packet_startreset_silence[], int numberof_max_delays, int remainderdelay) {
 	rmt_item32_t delaypacket;
 	for (int i = 0; i<numberof_max_delays; i++) {
@@ -72,11 +87,6 @@ void generate_packet_startreset_silence(rmt_item32_t packet_startreset_silence[]
 	}
 	delaypacket.duration0 = remainderdelay;
 	packet_startreset_silence[numberof_max_delays] = delaypacket;
-}
-
-int generate_big_package_size(int leds) {
-	//packet_resetdevice + packet_delayresetsync + packet_syncdevice + ledsilence + packet_startdata
-	return 19+1+30+1+19;
 }
 
 void generate_big_package(TLSCONFIG *conf) {
@@ -88,7 +98,10 @@ void generate_big_package(TLSCONFIG *conf) {
 	delaypacket.level1 = 0;
 
 	//Calculate start indexes, delay between Sync and Star varrays on the number of leds * 187µs
-	conf->packetSize = (sizeof(packet_resetdevice)+sizeof(packet_delayresetsync)+sizeof(packet_syncdevice)+sizeof(delaypacket)+sizeof(packet_startdata))/sizeof(rmt_item32_t);
+	int startrgbSize = sizeof(packet_startandblackrgb)/sizeof(rmt_item32_t);
+	conf->packetSize = (sizeof(packet_resetdevice)+sizeof(packet_delayresetsync)+sizeof(packet_syncdevice))/sizeof(rmt_item32_t);
+	conf->packetSize += sizeof(delaypacket)/sizeof(rmt_item32_t);
+	conf->packetSize += startrgbSize*conf->numberOfLeds;
 	conf->indexReset = 0;
 	conf->indexDelayResetSync = conf->indexReset + sizeof(packet_resetdevice)/sizeof(rmt_item32_t);
 	conf->indexSync = conf->indexDelayResetSync + sizeof(packet_delayresetsync)/sizeof(rmt_item32_t);
@@ -102,9 +115,13 @@ void generate_big_package(TLSCONFIG *conf) {
 	memcpy(&conf->pPacket[conf->indexReset], packet_resetdevice, sizeof(packet_resetdevice));
 	memcpy(&conf->pPacket[conf->indexDelayResetSync], packet_delayresetsync, sizeof(packet_delayresetsync));
 	memcpy(&conf->pPacket[conf->indexSync], packet_syncdevice, sizeof(packet_syncdevice));
-
 	memcpy(&conf->pPacket[conf->indexDelaySyncStart], &delaypacket, sizeof(delaypacket));
-	memcpy(&conf->pPacket[conf->indexStart], packet_startdata, sizeof(packet_startdata));
+
+	//Fill the rest of the packet with start and black RGB packets
+	//memcpy(&conf->pPacket[conf->indexStart], packet_startandblackrgb, sizeof(packet_startandblackrgb));
+	for (int i = 0; i < conf->numberOfLeds; i++) {
+		memcpy(&conf->pPacket[conf->indexStart+(startrgbSize*i)], packet_startandblackrgb, sizeof(packet_startandblackrgb));
+	}
 }
 
 static void light_control(void *arg) {
@@ -120,7 +137,7 @@ static void light_control(void *arg) {
 	ESP_LOGI(TAG, "[APP] Total leds: %d, number of max delays: %d, remainder: %d", number_of_leds, numberof_max_delays, remainderdelay);
 
 	TLSCONFIG tlsconf;
-	tlsconf.numberOfLeds = 2;
+	tlsconf.numberOfLeds = 10;
 	tlsconf.config.rmt_mode = RMT_MODE_TX;
 	tlsconf.config.channel = RMT_CHANNEL_0;
 	tlsconf.config.gpio_num = 18;
@@ -134,8 +151,6 @@ static void light_control(void *arg) {
 	ESP_ERROR_CHECK(rmt_config(&tlsconf.config));
 	ESP_ERROR_CHECK(rmt_driver_install(tlsconf.config.channel, 0, 0));
 
-	//rmt_item32_t packet_big[generate_big_package_size(number_of_leds)];
-	//generate_big_package(packet_big, number_of_leds);
 	generate_big_package(&tlsconf);
 
 	ESP_LOGI(TAG, "[APP] Init done");
