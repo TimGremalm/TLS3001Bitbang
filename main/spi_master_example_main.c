@@ -35,11 +35,11 @@ typedef struct {
 #define NUM(a) (sizeof(a) / sizeof(*a))
 #define RMT_BLOCK_LEN	32
 #define RMT_MAX_DELAY 32767
-#define blank_187us 187
+#define blank_187us 180	//(1/0.1667)*30 (delay = numberofleds/baudMHz * 30)
 #define data_one  {{{ 3, 1, 3, 0 }}}
 #define data_zero {{{ 3, 0, 3, 1 }}}
 #define data_1msblank {{{ 500, 0, 500, 0 }}}
-#define data_rgbdelay {{{ 20, 0, 20, 0 }}}
+#define data_rgbdelay {{{ 2, 0, 1, 0 }}}
 
 rmt_item32_t packet_resetdevice[] = {
 	data_one, data_one, data_one, data_one, data_one, data_one, data_one, data_one, data_one, data_one, data_one, data_one, data_one, data_one, data_one,
@@ -69,12 +69,12 @@ rmt_item32_t packet_startdata[] = {
 
 rmt_item32_t packet_startandblackrgb[] = {
 	data_zero,
-	data_zero, data_zero, data_zero, data_zero, data_one, data_zero, data_zero, data_zero, data_zero, data_zero, data_zero, data_one,
+	data_zero, data_zero, data_zero, data_zero, data_one, data_zero, data_zero, data_zero, data_zero, data_zero, data_zero, data_zero,
 	data_zero,
-	data_zero, data_zero, data_zero, data_zero, data_zero, data_zero, data_zero, data_zero, data_zero, data_zero, data_zero, data_one,
+	data_zero, data_zero, data_zero, data_zero, data_one, data_zero, data_zero, data_zero, data_zero, data_zero, data_zero, data_zero,
 	data_zero,
-	data_zero, data_zero, data_zero, data_zero, data_zero, data_zero, data_zero, data_zero, data_zero, data_zero, data_zero, data_one //Data for each pixel (39 bits, 1 x 0b0, 12bits pixel data, 1 x 0b0, 12bits pixel data, 1 x 0b0 & 12bits pixel data)
-}; 
+	data_zero, data_zero, data_zero, data_zero, data_zero, data_zero, data_zero, data_zero, data_zero, data_zero, data_zero, data_zero //Data for each pixel (39 bits, 1 x 0b0, 12bits pixel data, 1 x 0b0, 12bits pixel data, 1 x 0b0 & 12bits pixel data)
+};
 
 void generate_packet_startreset_silence(rmt_item32_t packet_startreset_silence[], int numberof_max_delays, int remainderdelay) {
 	rmt_item32_t delaypacket;
@@ -134,7 +134,7 @@ void generate_big_package(TLSCONFIG *conf) {
 static void light_control(void *arg) {
 	ESP_LOGI(TAG, "[APP] Init");
 
-	int number_of_leds = 2;
+	int number_of_leds = 10;
 
 	int total_delay = number_of_leds * blank_187us;
 	int numberof_max_delays = total_delay / RMT_MAX_DELAY;
@@ -147,7 +147,7 @@ static void light_control(void *arg) {
 	tlsconf.numberOfLeds = 10;
 	tlsconf.config.rmt_mode = RMT_MODE_TX;
 	tlsconf.config.channel = RMT_CHANNEL_0;
-	tlsconf.config.gpio_num = 18;
+	tlsconf.config.gpio_num = 19;
 	tlsconf.config.mem_block_num = 1;
 	tlsconf.config.tx_config.loop_en = 0;
 	tlsconf.config.tx_config.carrier_en = 0;
@@ -164,7 +164,7 @@ static void light_control(void *arg) {
 	while (1) {
 		ESP_LOGI(TAG, "[APP] Send packet");
 		ESP_ERROR_CHECK(rmt_write_items(tlsconf.config.channel, tlsconf.pPacket, tlsconf.packetSize, true));
-		vTaskDelay(10 / portTICK_PERIOD_MS);
+		vTaskDelay(500 / portTICK_PERIOD_MS);
 	}
 }
 
