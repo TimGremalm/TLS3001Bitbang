@@ -3,7 +3,7 @@
 # project subdirectory.
 #
 
-PROJECT_NAME := spi_master
+PROJECT_NAME := tls3001_led_esp32
 
 include $(IDF_PATH)/make/project.mk
 
