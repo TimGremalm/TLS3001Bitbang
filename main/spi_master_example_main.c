@@ -102,18 +102,17 @@ void generate_packet_startreset_silence(rmt_item32_t packet_startreset_silence[]
 	packet_startreset_silence[numberof_max_delays] = delaypacket;
 }
 
-void setPixel(TLSCONFIG *conf, int index, int8_t red, int8_t green, int8_t blue) {
-	//memcpy(&conf->pPacket[conf->indexDelaySyncStart], &delaypacket, sizeof(delaypacket));
-	//conf->indexPacket = conf->indexStart + sizeof(packet_startdata)/sizeof(rmt_item32_t);
-	//conf->indexPacket
+void setPixel(TLSCONFIG *conf, int index, int8_t red, int8_t green, int8_t blue, int brightness) {
+	//Red, green and blue is only 8 bits
+	//Brightness bitshifts the color channel, can only be 0 to 4
 	int i;
 	int bitRed;
 	int bitGreen;
 	int bitBlue;
 	int rgbSize = sizeof(packet_startandblackrgb)/sizeof(rmt_item32_t);
-	int indexRed = conf->indexPacket + (index*rgbSize) + 1;
-	int indexGreen = conf->indexPacket + (index*rgbSize) + 1+12+1;
-	int indexBlue = conf->indexPacket + (index*rgbSize) + 1+12+1+12+1;
+	int indexRed = conf->indexPacket + (index*rgbSize) + 1;				//Offset + one start bit
+	int indexGreen = conf->indexPacket + (index*rgbSize) + 1+12+1;		//Offset + one start bit + previous 1 index
+	int indexBlue = conf->indexPacket + (index*rgbSize) + 1+12+1+12+1;	//Offset + one start bit + previous 2 index
 
 	//Bitshift for each bit in uint8, write bianry one or zero
 	for (i = 7; i >= 0; i--) {
@@ -122,21 +121,21 @@ void setPixel(TLSCONFIG *conf, int index, int8_t red, int8_t green, int8_t blue)
 		bitBlue = blue >> i;
 		//Red
 		if (bitRed & 1) {
-			memcpy(&conf->pPacket[indexRed+i], packet_one, sizeof(packet_one));
+			memcpy(&conf->pPacket[indexRed+11-i-brightness], packet_one, sizeof(packet_one));
 		} else {
-			memcpy(&conf->pPacket[indexRed+i], packet_zero, sizeof(packet_zero));
+			memcpy(&conf->pPacket[indexRed+11-i-brightness], packet_zero, sizeof(packet_zero));
 		}
 		//Green
 		if (bitGreen & 1) {
-			memcpy(&conf->pPacket[indexGreen+i], packet_one, sizeof(packet_one));
+			memcpy(&conf->pPacket[indexGreen+11-i-brightness], packet_one, sizeof(packet_one));
 		} else {
-			memcpy(&conf->pPacket[indexGreen+i], packet_zero, sizeof(packet_zero));
+			memcpy(&conf->pPacket[indexGreen+11-i-brightness], packet_zero, sizeof(packet_zero));
 		}
 		//Blue
 		if (bitBlue & 1) {
-			memcpy(&conf->pPacket[indexBlue+i], packet_one, sizeof(packet_one));
+			memcpy(&conf->pPacket[indexBlue+11-i-brightness], packet_one, sizeof(packet_one));
 		} else {
-			memcpy(&conf->pPacket[indexBlue+i], packet_zero, sizeof(packet_zero));
+			memcpy(&conf->pPacket[indexBlue+11-i-brightness], packet_zero, sizeof(packet_zero));
 		}
 	}
 }
@@ -184,6 +183,7 @@ void generate_big_package(TLSCONFIG *conf) {
 		memcpy(&conf->pPacket[conf->indexPacket+(startrgbSize*i)], packet_startandblackrgb, sizeof(packet_startandblackrgb));
 	}
 
+	//A last start packet should be added on the end, and a small delay before we start again
 	memcpy(&conf->pPacket[conf->indexStartEnd], packet_startdata_withdelay, sizeof(packet_startdata_withdelay));
 }
 
@@ -219,17 +219,23 @@ static void light_control(void *arg) {
 	ESP_LOGI(TAG, "[APP] Init done");
 	while (1) {
 		ESP_LOGI(TAG, "[APP] Send packet");
+		//RMT write whole packet
 		ESP_ERROR_CHECK(rmt_write_items(tlsconf.config.channel, tlsconf.pPacket, tlsconf.packetSize, true));
 		vTaskDelay(23 / portTICK_PERIOD_MS);
-		for (int j = 0; j<30; j++) {
-			for (int k = 0; k < tlsconf.numberOfLeds; k++) {
-				setPixel(&tlsconf, k, j, j, j);
+		for (int j = 0; j<255; j++) {
+			for (int pixelid = 0; pixelid < tlsconf.numberOfLeds; pixelid++) {
+				if (pixelid % 3 == 0) { //Every first pixel
+					setPixel(&tlsconf, pixelid, j, 0, 0, 0);
+				}
+				if (pixelid % 3 == 1) { //Every second pixel
+					setPixel(&tlsconf, pixelid, 0, j, 0, 0);
+				}
+				if (pixelid % 3 == 2) { //Every third pixel
+					setPixel(&tlsconf, pixelid, 0, 0, j, 0);
+				}
 			}
-			//Only send data packet
+			//RMT only send data packet, exclude reset and sync
 			ESP_ERROR_CHECK(rmt_write_items(tlsconf.config.channel, &tlsconf.pPacket[tlsconf.indexStart], tlsconf.packetSize-tlsconf.indexStart, true));
-			//Send whole packet including sync
-			//ESP_ERROR_CHECK(rmt_write_items(tlsconf.config.channel, tlsconf.pPacket, tlsconf.packetSize, true));
-			vTaskDelay(20 / portTICK_PERIOD_MS);
 		}
 		vTaskDelay(500 / portTICK_PERIOD_MS);
 	}
