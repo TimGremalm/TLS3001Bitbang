@@ -13,8 +13,6 @@ https://docs.espressif.com/projects/esp-idf/en/latest/api-reference/peripherals/
 ## LED Protocol
 * The LED driver TLS3001 uses a Manchester coded format where a falling edge represents a logical One, and a raising edge represents a zero.
 
-![TLS3001 Protocol Flow Chart](protocol/TLS3001-flow_chart.png)
-
 * The speed of the protocol can be between 100kHz and 1MHz.
 
 * A sequence consists of the following sequences
@@ -28,6 +26,7 @@ https://docs.espressif.com/projects/esp-idf/en/latest/api-reference/peripherals/
 7. Start of data (19 bits, 15 x 0b1, 2 x 0b0, 1 x 0b1 & 1 x 0b0). For applying the data.
 8. 0.125ms delay between end of last data and start or reset
 
+![TLS3001 Protocol Flow Chart](protocol/TLS3001-flow_chart.png)
 ![TLS3001 Protocol Saleae Logic Dump](protocol/TLS3001_Protocol_Dump_12MHz_18MSamples.png)
 
 Saleae Logig dump: https://github.com/TimGremalm/TLS3001_LED_ESP32/raw/master/protocol/TLS3001_Protocol_Dump_12MHz_18MSamples.logicdata
